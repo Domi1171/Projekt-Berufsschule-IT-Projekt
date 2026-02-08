@@ -10,7 +10,7 @@ String serverHost = "www.elbawohnmobile.de";
 String serverPath = "/save_sensor_data.php";
 
 unsigned long lastTime = 0;
-unsigned long timerDelay = 600000; //10 Minuten
+unsigned long timerDelay = 600000;
 
 bool firstRun = true;
 
@@ -82,6 +82,30 @@ void loop() {
   Serial.print((int)moisture);
   Serial.print(" % | Light: ");
   Serial.println((int)light);
+
+  carrier.display.fillScreen(0x0000);
+  carrier.display.setTextColor(0xFFFF);
+  carrier.display.setTextSize(2);
+
+  carrier.display.setCursor(40, 55);
+  carrier.display.print("Temp: ");
+  carrier.display.print(temperature, 1);
+  carrier.display.println(" C");
+
+  carrier.display.setCursor(40, 90);
+  carrier.display.print("Hum:  ");
+  carrier.display.print(humidity, 1);
+  carrier.display.println(" %");
+
+  carrier.display.setCursor(40, 125);
+  carrier.display.print("Soil: ");
+  carrier.display.print((int)moisture);
+  carrier.display.println(" %");
+
+  carrier.display.setCursor(40, 160);
+  carrier.display.print("Light:");
+  carrier.display.print((int)light);
+  carrier.display.println(" lx");
 
   if (firstRun || (millis() - lastTime) > timerDelay) {
     if (WiFi.status() == WL_CONNECTED) {
