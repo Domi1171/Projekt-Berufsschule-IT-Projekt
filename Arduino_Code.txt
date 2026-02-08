@@ -1,0 +1,152 @@
+#include "thingProperties.h"
+#include <Arduino_MKRIoTCarrier.h>
+#include <WiFiNINA.h>
+
+MKRIoTCarrier carrier;
+
+int moistPin;
+
+String serverHost = "www.elbawohnmobile.de";
+String serverPath = "/save_sensor_data.php";
+
+unsigned long lastTime = 0;
+unsigned long timerDelay = 600000; //10 Minuten
+
+bool firstRun = true;
+
+WiFiClient client;
+
+void setup() {
+  Serial.begin(9600);
+  delay(1500);
+  
+  Serial.println("=== Arduino Plant Project Starting ===");
+  
+  initProperties();
+  ArduinoCloud.begin(ArduinoIoTPreferredConnection);
+  
+  setDebugMessageLevel(2);
+  ArduinoCloud.printDebugInfo();
+  
+  Serial.println("Connecting to Arduino IoT Cloud...");
+  while (ArduinoCloud.connected() != 1) {
+    ArduinoCloud.update();
+    delay(500);
+  }
+  Serial.println("Connected to Arduino IoT Cloud!");
+  
+  delay(500);
+  CARRIER_CASE = false;
+  carrier.begin();
+  
+  Wire.beginTransmission(0x39);
+  Wire.write(0x8F);
+  Wire.write(0x03);
+  Wire.endTransmission();
+  
+  moistPin = carrier.getBoardRevision() == 1 ? A5 : A0;
+  Serial.print("Board Revision erkannt - Moisture Pin: ");
+  Serial.println(moistPin == A5 ? "A5 (Rev1)" : "A0 (Rev2)");
+  
+  carrier.display.setRotation(0);
+  delay(1500);
+  
+  Serial.println("=== Setup Complete ===");
+  Serial.println("Server: http://" + serverHost + serverPath);
+  Serial.println("Intervall: alle 10 Minuten");
+  Serial.println();
+}
+
+void loop() {
+  ArduinoCloud.update();
+  
+  temperature = carrier.Env.readTemperature();
+  humidity    = carrier.Env.readHumidity();
+  
+  int raw_moisture = analogRead(moistPin);
+  moisture = map(raw_moisture, 0, 1023, 100, 0);
+  
+  while (!carrier.Light.colorAvailable()) {
+    delay(5);
+  }
+  int none;
+  int ambientLight;
+  carrier.Light.readColor(none, none, none, ambientLight);
+  light = ambientLight;
+  
+  Serial.print("Temp: ");
+  Serial.print(temperature, 1);
+  Serial.print(" C | Hum: ");
+  Serial.print(humidity, 1);
+  Serial.print(" % | Moisture: ");
+  Serial.print((int)moisture);
+  Serial.print(" % | Light: ");
+  Serial.println((int)light);
+
+  if (firstRun || (millis() - lastTime) > timerDelay) {
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println();
+      Serial.println("========================================");
+      Serial.println("Sende Daten an Datenbank...");
+      sendDataToDatabase(temperature, humidity, moisture, light);
+      Serial.println("========================================");
+      Serial.println();
+      
+      lastTime = millis();
+      firstRun = false;
+    } else {
+      Serial.println("FEHLER: WiFi nicht verbunden!");
+    }
+  }
+  
+  delay(100);
+}
+
+void sendDataToDatabase(float temp, float hum, float moist, float lgt) {
+  Serial.println("Verbinde mit: " + serverHost);
+  
+  if (client.connect(serverHost.c_str(), 80)) {
+    Serial.println("Verbunden!");
+    
+    String postData = "temperature=" + String(temp, 2) +
+                      "&humidity="   + String(hum, 2) +
+                      "&moisture="   + String(moist, 2) +
+                      "&light="      + String((int)lgt);
+    
+    Serial.println("POST: " + postData);
+    
+    client.println("POST " + serverPath + " HTTP/1.1");
+    client.println("Host: " + serverHost);
+    client.println("Content-Type: application/x-www-form-urlencoded");
+    client.print("Content-Length: ");
+    client.println(postData.length());
+    client.println("Connection: close");
+    client.println();
+    client.print(postData);
+    
+    Serial.println("Warte auf Antwort...");
+    unsigned long timeout = millis();
+    while (client.available() == 0) {
+      if (millis() - timeout > 5000) {
+        Serial.println("FEHLER: Timeout - Server antwortet nicht!");
+        client.stop();
+        return;
+      }
+    }
+    
+    Serial.println("--- Server Antwort ---");
+    while (client.available()) {
+      String line = client.readStringUntil('\n');
+      if (line.startsWith("{")) {
+        Serial.println(line);
+      }
+    }
+    Serial.println("--- Ende ---");
+    Serial.println("Daten erfolgreich gesendet!");
+    
+    client.stop();
+    
+  } else {
+    Serial.println("FEHLER: Verbindung zum Server fehlgeschlagen!");
+  }
+}
